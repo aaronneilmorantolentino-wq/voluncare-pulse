@@ -1,5 +1,5 @@
 import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 
 export const Route = createFileRoute("/auth")({
@@ -21,6 +21,9 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showConfirmEmail, setShowConfirmEmail] = useState(false);
+
+  useEffect(() => { document.title = "Acceder — VolunCare"; }, []);
 
   if (loading) return null;
   if (user) return <Navigate to="/" />;
@@ -41,8 +44,35 @@ function AuthPage() {
       setError(err);
       return;
     }
+
+    // Si es signup y no hay sesión, significa que necesita confirmar email
+    if (mode === "signup") {
+      setShowConfirmEmail(true);
+      return;
+    }
+
     navigate({ to: "/" });
   };
+
+  if (showConfirmEmail) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted px-4">
+        <div className="w-full max-w-sm space-y-6 rounded-2xl border border-border bg-card p-6 shadow-xl text-center">
+          <div className="text-5xl">📧</div>
+          <h2 className="text-xl font-bold">Revisa tu correo</h2>
+          <p className="text-sm text-muted-foreground">
+            Te enviamos un enlace de confirmación a <strong>{email}</strong>. Haz clic en el enlace para activar tu cuenta.
+          </p>
+          <button
+            onClick={() => { setShowConfirmEmail(false); setMode("signin"); }}
+            className="w-full rounded-lg bg-primary py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+          >
+            Ya confirmé, iniciar sesión
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted px-4">

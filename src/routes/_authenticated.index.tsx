@@ -47,49 +47,53 @@ function Dashboard() {
   const [streak, setStreak] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => { document.title = "VolunCare — Tu pulso emocional"; }, []);
+
   useEffect(() => {
     if (!user) return;
 
     const fetchData = async () => {
-      // Fetch profile
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("nombre_completo")
-        .eq("id", user.id)
-        .single();
+      // Parallel queries for better performance
+      const [profileResult, checkInsResult] = await Promise.allSettled([
+        supabase.from("profiles").select("nombre_completo").eq("id", user.id).single(),
+        supabase.from("check_ins")
+          .select("nivel_energia, nivel_animo, emocion_principal, fecha_hora")
+          .eq("voluntario_id", user.id)
+          .order("fecha_hora", { ascending: false })
+          .limit(30),
+      ]);
 
-      if (profileData) setProfile(profileData);
+      if (profileResult.status === "fulfilled" && profileResult.value.data) {
+        setProfile(profileResult.value.data);
+      }
 
-      // Fetch last check-in
-      const { data: checkIns } = await supabase
-        .from("check_ins")
-        .select("nivel_energia, nivel_animo, emocion_principal, fecha_hora")
-        .eq("voluntario_id", user.id)
-        .order("fecha_hora", { ascending: false })
-        .limit(30);
+      if (checkInsResult.status === "fulfilled" && checkInsResult.value.data) {
+        const checkIns = checkInsResult.value.data;
+        if (checkIns.length > 0) {
+          setLastCheckIn(checkIns[0]);
 
-      if (checkIns && checkIns.length > 0) {
-        setLastCheckIn(checkIns[0]);
+          // Streak: use local date strings to avoid timezone mismatch
+          let currentStreak = 0;
+          const today = new Date();
+          for (let i = 0; i < 30; i++) {
+            const targetDate = new Date(today);
+            targetDate.setDate(targetDate.getDate() - i);
+            const localDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
 
-        // Calculate streak: consecutive days with at least one check-in
-        let currentStreak = 0;
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+            const hasCheckIn = checkIns.some((c) => {
+              const ciDate = new Date(c.fecha_hora);
+              const ciLocal = `${ciDate.getFullYear()}-${String(ciDate.getMonth() + 1).padStart(2, '0')}-${String(ciDate.getDate()).padStart(2, '0')}`;
+              return ciLocal === localDateStr;
+            });
 
-        for (let i = 0; i < 30; i++) {
-          const targetDate = new Date(today);
-          targetDate.setDate(targetDate.getDate() - i);
-          const dateStr = targetDate.toISOString().slice(0, 10);
-
-          const hasCheckIn = checkIns.some((c) => c.fecha_hora.slice(0, 10) === dateStr);
-
-          if (hasCheckIn) {
-            currentStreak++;
-          } else {
-            break;
+            if (hasCheckIn) {
+              currentStreak++;
+            } else {
+              break;
+            }
           }
+          setStreak(currentStreak);
         }
-        setStreak(currentStreak);
       }
 
       setLoading(false);

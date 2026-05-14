@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/AppShell";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export const Route = createFileRoute("/_authenticated/botiquin")({
   head: () => ({ meta: [{ title: "Botiquín — VolunCare" }] }),
@@ -94,6 +94,7 @@ const CRISIS_CONTACTS = [
 
 function Botiquin() {
   const [expanded, setExpanded] = useState<string | null>(null);
+  useEffect(() => { document.title = "Botiquín — VolunCare"; }, []);
 
   return (
     <AppShell title="Botiquín de Apoyo">

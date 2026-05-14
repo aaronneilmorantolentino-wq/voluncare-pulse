@@ -88,6 +88,8 @@ function Recursos() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string | null>(null);
 
+  useEffect(() => { document.title = "Recursos — VolunCare"; }, []);
+
   useEffect(() => {
     supabase
       .from("recursos_apoyo")

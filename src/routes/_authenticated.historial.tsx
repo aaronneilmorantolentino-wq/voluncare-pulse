@@ -44,6 +44,8 @@ function Historial() {
   const [checkIns, setCheckIns] = useState<CheckInRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => { document.title = "Historial — VolunCare"; }, []);
+
   useEffect(() => {
     if (!user) return;
 

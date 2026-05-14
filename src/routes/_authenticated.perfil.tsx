@@ -36,6 +36,8 @@ function Perfil() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => { document.title = "Perfil — VolunCare"; }, []);
+
   useEffect(() => {
     if (!user) return;
 
@@ -51,7 +53,8 @@ function Perfil() {
       const { data: checkIns } = await supabase
         .from("check_ins")
         .select("nivel_energia, nivel_animo, bandera_riesgo")
-        .eq("voluntario_id", user.id);
+        .eq("voluntario_id", user.id)
+        .limit(365);
 
       if (checkIns && checkIns.length > 0) {
         setStats({

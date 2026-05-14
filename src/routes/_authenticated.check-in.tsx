@@ -1,12 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/AppShell";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Database } from "@/integrations/supabase/types";
+import { z } from "zod";
 
 type EmocionPluchtik = Database["public"]["Enums"]["emocion_plutchik"];
 
@@ -37,6 +38,14 @@ const MENSAJES_EMPATICOS = [
   "Has dado un paso importante. Tu autoconocimiento crece cada día. 🌟",
 ];
 
+const checkInSchema = z.object({
+  voluntario_id: z.string().uuid(),
+  nivel_energia: z.number().int().min(1).max(5),
+  nivel_animo: z.number().int().min(1).max(5),
+  emocion_principal: z.enum(["alegria","confianza","miedo","sorpresa","tristeza","disgusto","enojo","anticipacion"]),
+  caja_catarsis: z.string().max(2000).nullable(),
+});
+
 function CheckIn() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -49,6 +58,8 @@ function CheckIn() {
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => { document.title = "Check-In — VolunCare"; }, []);
+
   const canAdvance = step === 1 ? true : step === 2 ? emocion !== null : true;
 
   const handleSubmit = async () => {
@@ -56,13 +67,22 @@ function CheckIn() {
     setSubmitting(true);
     setError(null);
 
-    const { error: err } = await supabase.from("check_ins").insert({
+    const payload = {
       voluntario_id: user.id,
       nivel_energia: energia,
       nivel_animo: animo,
       emocion_principal: emocion,
       caja_catarsis: catarsis.trim() || null,
-    });
+    };
+
+    const validation = checkInSchema.safeParse(payload);
+    if (!validation.success) {
+      setError("Datos inválidos. Verifica tus respuestas.");
+      setSubmitting(false);
+      return;
+    }
+
+    const { error: err } = await supabase.from("check_ins").insert(validation.data);
 
     setSubmitting(false);
 
@@ -221,10 +241,11 @@ function CheckIn() {
                 value={catarsis}
                 onChange={(e) => setCatarsis(e.target.value)}
                 rows={5}
+                maxLength={2000}
                 className="resize-none rounded-xl"
               />
               <p className="text-right text-xs text-muted-foreground">
-                {catarsis.length} caracteres
+                {catarsis.length}/2000 caracteres
               </p>
             </div>
           </div>
