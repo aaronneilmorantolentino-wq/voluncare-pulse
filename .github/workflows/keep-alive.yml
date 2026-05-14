@@ -1,0 +1,31 @@
+# Keep Supabase project alive by pinging the REST API every 5 days.
+# This prevents the free tier from pausing after 7 days of inactivity.
+#
+# IMPORTANT: GitHub disables cron workflows after 60 days of repo inactivity.
+# For redundancy, also configure an external cron (e.g., cron-job.org) to
+# ping: https://vedpltyhobbdevwsfmbr.supabase.co/rest/v1/?apikey=<anon_key>
+
+name: Keep Supabase Alive
+
+on:
+  schedule:
+    # Every 5 days at 08:00 UTC
+    - cron: '0 8 */5 * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/?limit=0")
+          echo "Response code: $response"
+          if [ "$response" -ne 200 ]; then
+            echo "::warning::Supabase ping returned $response"
+            exit 1
+          fi
+          echo "✅ Supabase is alive"
