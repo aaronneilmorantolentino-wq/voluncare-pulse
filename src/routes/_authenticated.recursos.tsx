@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/AppShell";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { safeFetch } from "@/lib/safe-fetch";
 
 export const Route = createFileRoute("/_authenticated/recursos")({
   head: () => ({ meta: [{ title: "Recursos — VolunCare" }] }),
@@ -88,17 +89,22 @@ function Recursos() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string | null>(null);
 
-  useEffect(() => { document.title = "Recursos — VolunCare"; }, []);
+  useEffect(() => {
+    document.title = "Recursos — VolunCare";
+  }, []);
 
   useEffect(() => {
-    supabase
-      .from("recursos_apoyo")
-      .select("id, nombre_recurso, tipo_intervencion, url_contenido, umbral_recomendado")
-      .order("tipo_intervencion")
-      .then(({ data }) => {
-        setRecursos(data && data.length > 0 ? data : FALLBACK_RECURSOS);
-        setLoading(false);
-      });
+    safeFetch(async () => {
+      const result = await supabase
+        .from("recursos_apoyo")
+        .select("id, nombre_recurso, tipo_intervencion, url_contenido, umbral_recomendado")
+        .order("tipo_intervencion");
+      return result;
+    }).then(({ data }) => {
+      const res = data as Recurso[] | null;
+      setRecursos(res && res.length > 0 ? res : FALLBACK_RECURSOS);
+      setLoading(false);
+    });
   }, []);
 
   const filtered = filter ? recursos.filter((r) => r.tipo_intervencion === filter) : recursos;
@@ -155,9 +161,7 @@ function Recursos() {
                 rel="noopener noreferrer"
                 className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 transition hover:bg-muted/50 hover:shadow-sm"
               >
-                <span className="text-2xl mt-0.5">
-                  {TIPO_EMOJIS[r.tipo_intervencion] ?? "📄"}
-                </span>
+                <span className="text-2xl mt-0.5">{TIPO_EMOJIS[r.tipo_intervencion] ?? "📄"}</span>
                 <div className="flex-1 min-w-0 space-y-1.5">
                   <p className="text-sm font-medium leading-snug">{r.nombre_recurso}</p>
                   <div className="flex items-center gap-2">

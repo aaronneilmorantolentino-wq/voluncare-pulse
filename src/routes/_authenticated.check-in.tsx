@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/AppShell";
 import { useState, useEffect } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
@@ -17,14 +18,49 @@ export const Route = createFileRoute("/_authenticated/check-in")({
 });
 
 const EMOCIONES: { value: EmocionPluchtik; emoji: string; label: string; color: string }[] = [
-  { value: "alegria", emoji: "😊", label: "Alegría", color: "bg-yellow-100 border-yellow-400 text-yellow-800" },
-  { value: "confianza", emoji: "🤝", label: "Confianza", color: "bg-green-100 border-green-400 text-green-800" },
-  { value: "miedo", emoji: "😰", label: "Miedo", color: "bg-purple-100 border-purple-400 text-purple-800" },
-  { value: "sorpresa", emoji: "😲", label: "Sorpresa", color: "bg-cyan-100 border-cyan-400 text-cyan-800" },
-  { value: "tristeza", emoji: "😢", label: "Tristeza", color: "bg-blue-100 border-blue-400 text-blue-800" },
-  { value: "disgusto", emoji: "😣", label: "Disgusto", color: "bg-lime-100 border-lime-400 text-lime-800" },
+  {
+    value: "alegria",
+    emoji: "😊",
+    label: "Alegría",
+    color: "bg-yellow-100 border-yellow-400 text-yellow-800",
+  },
+  {
+    value: "confianza",
+    emoji: "🤝",
+    label: "Confianza",
+    color: "bg-green-100 border-green-400 text-green-800",
+  },
+  {
+    value: "miedo",
+    emoji: "😰",
+    label: "Miedo",
+    color: "bg-purple-100 border-purple-400 text-purple-800",
+  },
+  {
+    value: "sorpresa",
+    emoji: "😲",
+    label: "Sorpresa",
+    color: "bg-cyan-100 border-cyan-400 text-cyan-800",
+  },
+  {
+    value: "tristeza",
+    emoji: "😢",
+    label: "Tristeza",
+    color: "bg-blue-100 border-blue-400 text-blue-800",
+  },
+  {
+    value: "disgusto",
+    emoji: "😣",
+    label: "Disgusto",
+    color: "bg-lime-100 border-lime-400 text-lime-800",
+  },
   { value: "enojo", emoji: "😠", label: "Enojo", color: "bg-red-100 border-red-400 text-red-800" },
-  { value: "anticipacion", emoji: "🤔", label: "Anticipación", color: "bg-orange-100 border-orange-400 text-orange-800" },
+  {
+    value: "anticipacion",
+    emoji: "🤔",
+    label: "Anticipación",
+    color: "bg-orange-100 border-orange-400 text-orange-800",
+  },
 ];
 
 const ENERGIA_LABELS = ["🔋 Agotado", "😔 Bajo", "😐 Normal", "💪 Bien", "⚡ Lleno"];
@@ -42,29 +78,55 @@ const checkInSchema = z.object({
   voluntario_id: z.string().uuid(),
   nivel_energia: z.number().int().min(1).max(5),
   nivel_animo: z.number().int().min(1).max(5),
-  emocion_principal: z.enum(["alegria","confianza","miedo","sorpresa","tristeza","disgusto","enojo","anticipacion"]),
+  emocion_principal: z.enum([
+    "alegria",
+    "confianza",
+    "miedo",
+    "sorpresa",
+    "tristeza",
+    "disgusto",
+    "enojo",
+    "anticipacion",
+  ]),
   caja_catarsis: z.string().max(2000).nullable(),
 });
 
 function CheckIn() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
   const [energia, setEnergia] = useState(3);
   const [animo, setAnimo] = useState(3);
   const [emocion, setEmocion] = useState<EmocionPluchtik | null>(null);
   const [catarsis, setCatarsis] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { document.title = "Check-In — VolunCare"; }, []);
+  useEffect(() => {
+    document.title = "Check-In — VolunCare";
+  }, []);
 
   const canAdvance = step === 1 ? true : step === 2 ? emocion !== null : true;
 
-  const handleSubmit = async () => {
+  const mutation = useMutation({
+    mutationFn: async (validatedData: z.infer<typeof checkInSchema>) => {
+      const { error: err } = await supabase.from("check_ins").insert(validatedData);
+      if (err) throw err;
+    },
+    onSuccess: () => {
+      // Invalidar caché para que Historial y Perfil se refresquen automáticamente
+      queryClient.invalidateQueries({ queryKey: ["check_ins", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["profile_stats", user?.id] });
+      setDone(true);
+    },
+    onError: () => {
+      setError("No se pudo guardar tu registro. Intenta de nuevo.");
+    },
+  });
+
+  const handleSubmit = () => {
     if (!user || !emocion) return;
-    setSubmitting(true);
     setError(null);
 
     const payload = {
@@ -78,20 +140,10 @@ function CheckIn() {
     const validation = checkInSchema.safeParse(payload);
     if (!validation.success) {
       setError("Datos inválidos. Verifica tus respuestas.");
-      setSubmitting(false);
       return;
     }
 
-    const { error: err } = await supabase.from("check_ins").insert(validation.data);
-
-    setSubmitting(false);
-
-    if (err) {
-      setError("No se pudo guardar tu registro. Intenta de nuevo.");
-      return;
-    }
-
-    setDone(true);
+    mutation.mutate(validation.data);
   };
 
   if (done) {
@@ -105,10 +157,13 @@ function CheckIn() {
           <h2 className="text-xl font-semibold text-center">Check-in guardado</h2>
           <p className="text-center text-sm text-muted-foreground max-w-xs">{msg}</p>
 
-          {(energia + animo) < 4 && (
+          {energia + animo < 4 && (
             <div className="w-full rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 space-y-2">
               <p className="font-semibold">💛 Notamos que fue un día difícil</p>
-              <p>Recuerda que está bien no estar bien. Si necesitas apoyo inmediato, visita el <strong>Botiquín</strong>.</p>
+              <p>
+                Recuerda que está bien no estar bien. Si necesitas apoyo inmediato, visita el{" "}
+                <strong>Botiquín</strong>.
+              </p>
               <button
                 onClick={() => navigate({ to: "/botiquin" })}
                 className="mt-2 w-full rounded-lg bg-amber-200 py-2 text-sm font-medium text-amber-900 transition hover:bg-amber-300"
@@ -233,7 +288,8 @@ function CheckIn() {
             <div className="rounded-2xl border border-border bg-card p-5 space-y-4">
               <h3 className="font-semibold">📝 Caja de Catarsis</h3>
               <p className="text-xs text-muted-foreground">
-                Opcional. Escribir lo que sientes ayuda a regular tus emociones. Este espacio es tuyo y es privado.
+                Opcional. Escribir lo que sientes ayuda a regular tus emociones. Este espacio es
+                tuyo y es privado.
               </p>
               <Textarea
                 id="catarsis-textarea"
@@ -282,11 +338,11 @@ function CheckIn() {
           ) : (
             <button
               type="button"
-              disabled={submitting || !emocion}
+              disabled={mutation.isPending || !emocion}
               onClick={handleSubmit}
               className="flex-1 rounded-xl bg-primary py-3 font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
             >
-              {submitting ? "Guardando..." : "Guardar Check-In"}
+              {mutation.isPending ? "Guardando..." : "Guardar Check-In"}
             </button>
           )}
         </div>

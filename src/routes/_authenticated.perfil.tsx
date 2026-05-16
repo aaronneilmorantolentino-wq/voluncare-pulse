@@ -1,20 +1,30 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/AppShell";
 import { useAuth } from "@/contexts/AuthContext";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
+import { z } from "zod";
 
 export const Route = createFileRoute("/_authenticated/perfil")({
   head: () => ({ meta: [{ title: "Perfil — VolunCare" }] }),
   component: Perfil,
 });
 
-type Profile = {
-  nombre_completo: string;
-  email: string;
-  rol_asignado: string | null;
-  created_at: string;
-};
+const profileSchema = z.object({
+  nombre_completo: z.string(),
+  email: z.string(),
+  rol_asignado: z.string().nullable(),
+  created_at: z.string(),
+});
+
+type Profile = z.infer<typeof profileSchema>;
+
+const statsRowSchema = z.object({
+  nivel_energia: z.number(),
+  nivel_animo: z.number(),
+  bandera_riesgo: z.boolean().nullable(),
+});
 
 type Stats = {
   totalCheckIns: number;
@@ -32,44 +42,53 @@ const ROL_LABELS: Record<string, string> = {
 function Perfil() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => { document.title = "Perfil — VolunCare"; }, []);
-
-  useEffect(() => {
-    if (!user) return;
-
-    const fetchData = async () => {
-      const { data: profileData } = await supabase
+  const {
+    data: profile,
+    isLoading: isProfileLoading,
+    isError: isProfileError,
+  } = useQuery({
+    queryKey: ["profile", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
         .from("profiles")
         .select("nombre_completo, email, rol_asignado, created_at")
-        .eq("id", user.id)
+        .eq("id", user!.id)
         .single();
+      if (error) throw error;
+      return profileSchema.parse(data);
+    },
+    enabled: !!user,
+  });
 
-      if (profileData) setProfile(profileData);
-
-      const { data: checkIns } = await supabase
+  const {
+    data: stats,
+    isLoading: isStatsLoading,
+    isError: isStatsError,
+  } = useQuery({
+    queryKey: ["profile_stats", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
         .from("check_ins")
         .select("nivel_energia, nivel_animo, bandera_riesgo")
-        .eq("voluntario_id", user.id)
+        .eq("voluntario_id", user!.id)
         .limit(365);
+      if (error) throw error;
+      if (!data || data.length === 0) return null;
 
-      if (checkIns && checkIns.length > 0) {
-        setStats({
-          totalCheckIns: checkIns.length,
-          riskDays: checkIns.filter((c) => c.bandera_riesgo).length,
-          avgAnimo: +(checkIns.reduce((s, c) => s + c.nivel_animo, 0) / checkIns.length).toFixed(1),
-          avgEnergia: +(checkIns.reduce((s, c) => s + c.nivel_energia, 0) / checkIns.length).toFixed(1),
-        });
-      }
+      const parsed = z.array(statsRowSchema).parse(data);
 
-      setLoading(false);
-    };
+      return {
+        totalCheckIns: parsed.length,
+        riskDays: parsed.filter((c) => c.bandera_riesgo).length,
+        avgAnimo: +(parsed.reduce((s, c) => s + c.nivel_animo, 0) / parsed.length).toFixed(1),
+        avgEnergia: +(parsed.reduce((s, c) => s + c.nivel_energia, 0) / parsed.length).toFixed(1),
+      } as Stats;
+    },
+    enabled: !!user,
+  });
 
-    fetchData();
-  }, [user]);
+  const loading = isProfileLoading || isStatsLoading;
+  const isError = isProfileError || isStatsError;
 
   const handleSignOut = async () => {
     await signOut();
@@ -91,6 +110,20 @@ function Perfil() {
           <div className="flex justify-center py-12">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
+        ) : isError ? (
+          <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-8 text-center text-destructive">
+            <p className="text-3xl">⚠️</p>
+            <p className="mt-2 font-medium">Error de conexión</p>
+            <p className="mt-1 text-sm opacity-80">
+              No pudimos cargar tus datos. Por favor, verifica tu conexión e intenta de nuevo.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 rounded-lg bg-destructive/20 px-4 py-2 text-sm font-medium transition hover:bg-destructive/30"
+            >
+              Reintentar
+            </button>
+          </div>
         ) : (
           <>
             {/* Profile card */}
@@ -103,7 +136,9 @@ function Perfil() {
                   <h2 className="text-lg font-semibold truncate">
                     {profile?.nombre_completo ?? "Voluntario"}
                   </h2>
-                  <p className="text-xs text-muted-foreground break-all">{profile?.email ?? user?.email}</p>
+                  <p className="text-xs text-muted-foreground break-all">
+                    {profile?.email ?? user?.email}
+                  </p>
                 </div>
               </div>
 
@@ -147,8 +182,9 @@ function Perfil() {
             <div className="rounded-2xl bg-muted/30 p-4 space-y-1">
               <p className="text-xs font-medium">🔒 Privacidad y ética</p>
               <p className="text-xs text-muted-foreground">
-                Tus registros emocionales son privados. Solo tú y tu coordinador autorizado pueden verlos.
-                Los datos se usan exclusivamente para tu bienestar, nunca para evaluaciones de desempeño.
+                Tus registros emocionales son privados. Solo tú y tu coordinador autorizado pueden
+                verlos. Los datos se usan exclusivamente para tu bienestar, nunca para evaluaciones
+                de desempeño.
               </p>
             </div>
 
