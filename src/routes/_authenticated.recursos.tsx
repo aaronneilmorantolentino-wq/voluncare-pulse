@@ -2,20 +2,23 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/AppShell";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { safeFetch } from "@/lib/safe-fetch";
+import { useQuery } from "@tanstack/react-query";
+import { z } from "zod";
 
 export const Route = createFileRoute("/_authenticated/recursos")({
   head: () => ({ meta: [{ title: "Recursos — VolunCare" }] }),
   component: Recursos,
 });
 
-type Recurso = {
-  id: string;
-  nombre_recurso: string;
-  tipo_intervencion: string;
-  url_contenido: string;
-  umbral_recomendado: number | null;
-};
+const recursoSchema = z.object({
+  id: z.string(),
+  nombre_recurso: z.string(),
+  tipo_intervencion: z.string(),
+  url_contenido: z.string(),
+  umbral_recomendado: z.number().nullable(),
+});
+
+type Recurso = z.infer<typeof recursoSchema>;
 
 const TIPO_EMOJIS: Record<string, string> = {
   mindfulness: "🧘",
@@ -85,27 +88,24 @@ const FALLBACK_RECURSOS: Recurso[] = [
 ];
 
 function Recursos() {
-  const [recursos, setRecursos] = useState<Recurso[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = "Recursos — VolunCare";
   }, []);
 
-  useEffect(() => {
-    safeFetch(async () => {
-      const result = await supabase
+  const { data: recursos = FALLBACK_RECURSOS, isLoading: loading } = useQuery({
+    queryKey: ["recursos"],
+    queryFn: async () => {
+      const { data, error } = await supabase
         .from("recursos_apoyo")
         .select("id, nombre_recurso, tipo_intervencion, url_contenido, umbral_recomendado")
         .order("tipo_intervencion");
-      return result;
-    }).then(({ data }) => {
-      const res = data as Recurso[] | null;
-      setRecursos(res && res.length > 0 ? res : FALLBACK_RECURSOS);
-      setLoading(false);
-    });
-  }, []);
+      if (error) throw error;
+      const parsed = z.array(recursoSchema).parse(data);
+      return parsed.length > 0 ? parsed : FALLBACK_RECURSOS;
+    },
+  });
 
   const filtered = filter ? recursos.filter((r) => r.tipo_intervencion === filter) : recursos;
 

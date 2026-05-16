@@ -1,8 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/AppShell";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useQuery } from "@tanstack/react-query";
+import { z } from "zod";
 
 export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
@@ -14,13 +16,14 @@ export const Route = createFileRoute("/_authenticated/")({
   component: Dashboard,
 });
 
-type Profile = { nombre_completo: string };
-type LastCheckIn = {
-  nivel_energia: number;
-  nivel_animo: number;
-  emocion_principal: string;
-  fecha_hora: string;
-};
+const profileSchema = z.object({ nombre_completo: z.string() });
+
+const checkInSchema = z.object({
+  nivel_energia: z.number(),
+  nivel_animo: z.number(),
+  emocion_principal: z.string(),
+  fecha_hora: z.string(),
+});
 
 const EMOCION_EMOJIS: Record<string, string> = {
   alegria: "😊",
@@ -42,65 +45,65 @@ function timeGreeting() {
 
 function Dashboard() {
   const { user } = useAuth();
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [lastCheckIn, setLastCheckIn] = useState<LastCheckIn | null>(null);
-  const [streak, setStreak] = useState(0);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => { document.title = "VolunCare — Tu pulso emocional"; }, []);
 
-  useEffect(() => {
-    if (!user) return;
+  const { data: profile, isLoading: isProfileLoading } = useQuery({
+    queryKey: ["profile", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("nombre_completo")
+        .eq("id", user!.id)
+        .single();
+      if (error) throw error;
+      return profileSchema.parse(data);
+    },
+    enabled: !!user,
+  });
 
-    const fetchData = async () => {
-      // Parallel queries for better performance
-      const [profileResult, checkInsResult] = await Promise.allSettled([
-        supabase.from("profiles").select("nombre_completo").eq("id", user.id).single(),
-        supabase.from("check_ins")
-          .select("nivel_energia, nivel_animo, emocion_principal, fecha_hora")
-          .eq("voluntario_id", user.id)
-          .order("fecha_hora", { ascending: false })
-          .limit(30),
-      ]);
+  const { data: checkIns, isLoading: isCheckInsLoading, isError } = useQuery({
+    queryKey: ["dashboard_checkins", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("check_ins")
+        .select("nivel_energia, nivel_animo, emocion_principal, fecha_hora")
+        .eq("voluntario_id", user!.id)
+        .order("fecha_hora", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      return z.array(checkInSchema).parse(data);
+    },
+    enabled: !!user,
+  });
 
-      if (profileResult.status === "fulfilled" && profileResult.value.data) {
-        setProfile(profileResult.value.data);
+  const loading = isProfileLoading || isCheckInsLoading;
+  const lastCheckIn = checkIns?.[0] ?? null;
+
+  const streak = useMemo(() => {
+    if (!checkIns || checkIns.length === 0) return 0;
+    // Streak: use local date strings to avoid timezone mismatch
+    let currentStreak = 0;
+    const today = new Date();
+    for (let i = 0; i < 30; i++) {
+      const targetDate = new Date(today);
+      targetDate.setDate(targetDate.getDate() - i);
+      const localDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+
+      const hasCheckIn = checkIns.some((c) => {
+        const ciDate = new Date(c.fecha_hora);
+        const ciLocal = `${ciDate.getFullYear()}-${String(ciDate.getMonth() + 1).padStart(2, '0')}-${String(ciDate.getDate()).padStart(2, '0')}`;
+        return ciLocal === localDateStr;
+      });
+
+      if (hasCheckIn) {
+        currentStreak++;
+      } else {
+        break;
       }
-
-      if (checkInsResult.status === "fulfilled" && checkInsResult.value.data) {
-        const checkIns = checkInsResult.value.data;
-        if (checkIns.length > 0) {
-          setLastCheckIn(checkIns[0]);
-
-          // Streak: use local date strings to avoid timezone mismatch
-          let currentStreak = 0;
-          const today = new Date();
-          for (let i = 0; i < 30; i++) {
-            const targetDate = new Date(today);
-            targetDate.setDate(targetDate.getDate() - i);
-            const localDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
-
-            const hasCheckIn = checkIns.some((c) => {
-              const ciDate = new Date(c.fecha_hora);
-              const ciLocal = `${ciDate.getFullYear()}-${String(ciDate.getMonth() + 1).padStart(2, '0')}-${String(ciDate.getDate()).padStart(2, '0')}`;
-              return ciLocal === localDateStr;
-            });
-
-            if (hasCheckIn) {
-              currentStreak++;
-            } else {
-              break;
-            }
-          }
-          setStreak(currentStreak);
-        }
-      }
-
-      setLoading(false);
-    };
-
-    fetchData();
-  }, [user]);
+    }
+    return currentStreak;
+  }, [checkIns]);
 
   const firstName = profile?.nombre_completo?.split(" ")[0] ?? user?.email?.split("@")[0] ?? "Voluntario";
 
@@ -153,6 +156,19 @@ function Dashboard() {
                   : `Llevas ${streak} días seguidos haciendo tu check-in. ¡Increíble! 🎉`}
           </p>
         </div>
+
+        {/* Error state */}
+        {isError && (
+          <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-center text-destructive">
+            <p className="text-sm">No pudimos cargar tus datos. Verifica tu conexión.</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-2 rounded-lg bg-destructive/20 px-4 py-1.5 text-xs font-medium transition hover:bg-destructive/30"
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
 
         {/* Last check-in card */}
         {lastCheckIn && (
